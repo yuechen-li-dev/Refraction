@@ -1,7 +1,7 @@
 import { Room, RoomEvent, Track } from 'livekit-client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { resolveRoom } from '../api/client'
+import { ApiRequestError, resolveRoom } from '../api/client'
 import { StatusBadge } from '../components/StatusBadge'
 import type { ResolveRoomResponse, ViewerState } from '../types/app'
 
@@ -16,8 +16,20 @@ const viewerLabels: Record<ViewerState, { tone: 'neutral' | 'success' | 'warning
   error: { tone: 'danger', text: 'Error' },
 }
 
+const activePollIntervalMs = 4000
+const disconnectedRetryIntervalMs = 3000
+const fastStateCheckDelayMs = 250
+
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unable to load the stream.'
+}
+
+function isEndedState(roomInfo: ResolveRoomResponse): boolean {
+  return roomInfo.state === 'ended' || !roomInfo.viewerToken
+}
+
+function isDeadRoomError(error: unknown): error is ApiRequestError {
+  return error instanceof ApiRequestError && error.code === 'room_not_found'
 }
 
 export function ViewerPage() {
@@ -38,20 +50,44 @@ export function ViewerPage() {
     let disposed = false
     let pollId: number | undefined
 
-    const disconnect = () => {
-      roomRef.current?.disconnect()
-      roomRef.current = null
+    const clearPoll = () => {
+      if (pollId) {
+        window.clearTimeout(pollId)
+        pollId = undefined
+      }
+    }
+
+    const clearVideo = () => {
       if (videoRef.current) {
         videoRef.current.srcObject = null
       }
     }
 
-    const attachExistingTrack = () => {
+    const disconnectRoom = () => {
       const room = roomRef.current
-      if (!room) {
-        return false
+      roomRef.current = null
+      room?.disconnect()
+      clearVideo()
+    }
+
+    const transitionToDeadRoom = (error: ApiRequestError) => {
+      disconnectRoom()
+      setStatus('ended')
+      setMessage(error.message || 'This stream is no longer active.')
+    }
+
+    const schedulePoll = (delayMs: number) => {
+      if (disposed) {
+        return
       }
 
+      clearPoll()
+      pollId = window.setTimeout(() => {
+        void pollRoomState()
+      }, delayMs)
+    }
+
+    const attachExistingTrack = (room: Room) => {
       for (const participant of room.remoteParticipants.values()) {
         for (const publication of participant.trackPublications.values()) {
           if (publication.track?.kind === Track.Kind.Video && videoRef.current) {
@@ -64,83 +100,188 @@ export function ViewerPage() {
       return false
     }
 
-    const startPolling = () => {
-      pollId = window.setInterval(async () => {
-        try {
-          const next = await resolveRoom(slug)
-          if (disposed) {
-            return
-          }
+    const resolveLatestRoom = async () => {
+      const next = await resolveRoom(slug)
+      if (disposed) {
+        return null
+      }
 
-          setRoomInfo(next)
-          if (next.state === 'ended') {
-            setStatus('ended')
-            setMessage(next.message ?? 'This stream has ended.')
-            disconnect()
-          }
-        } catch {
-          if (!disposed) {
-            setStatus('disconnected')
-            setMessage('Lost contact with the backend while watching the stream.')
-          }
+      setRoomInfo(next)
+      return next
+    }
+
+    const transitionToEnded = (next: ResolveRoomResponse) => {
+      disconnectRoom()
+      setRoomInfo(next)
+      setStatus('ended')
+      setMessage(next.message ?? 'This stream has ended.')
+    }
+
+    const reconcileAfterConnectFailure = async (connectError: unknown) => {
+      try {
+        const latest = await resolveLatestRoom()
+        if (!latest) {
+          return true
         }
-      }, 5000)
+
+        if (isEndedState(latest)) {
+          transitionToEnded(latest)
+          return true
+        }
+      } catch (resolveError) {
+        if (isDeadRoomError(resolveError)) {
+          transitionToDeadRoom(resolveError)
+          return true
+        }
+      }
+
+      throw connectError
+    }
+
+    const connectToRoom = async (next: ResolveRoomResponse, reconnecting: boolean) => {
+      if (isEndedState(next)) {
+        transitionToEnded(next)
+        return
+      }
+
+      clearPoll()
+      disconnectRoom()
+
+      setStatus('joining')
+      setMessage(reconnecting ? 'Rejoining the stream…' : 'Joining the stream…')
+
+      const room = new Room({
+        adaptiveStream: true,
+        dynacast: false,
+      })
+
+      roomRef.current = room
+
+      room.on(RoomEvent.TrackSubscribed, (track) => {
+        if (disposed || roomRef.current !== room) {
+          return
+        }
+
+        if (track.kind === Track.Kind.Video && videoRef.current) {
+          track.attach(videoRef.current)
+          setStatus('live')
+          setMessage('Watching the host screen live.')
+        }
+      })
+
+      room.on(RoomEvent.TrackUnsubscribed, () => {
+        if (disposed || roomRef.current !== room) {
+          return
+        }
+
+        clearVideo()
+        setStatus('waiting_for_host')
+        setMessage('Waiting for the host to resume or republish their screen.')
+        schedulePoll(fastStateCheckDelayMs)
+      })
+
+      room.on(RoomEvent.Disconnected, () => {
+        if (disposed || roomRef.current !== room) {
+          return
+        }
+
+        roomRef.current = null
+        clearVideo()
+        setStatus('resolving_room')
+        setMessage('Stream connection dropped. Rechecking the room…')
+        schedulePoll(fastStateCheckDelayMs)
+      })
+
+      const viewerToken = next.viewerToken
+      if (!viewerToken) {
+        transitionToEnded(next)
+        return
+      }
+
+      try {
+        await room.connect(next.liveKitUrl, viewerToken)
+      } catch (error) {
+        if (disposed || roomRef.current !== room) {
+          room.disconnect()
+          return
+        }
+
+        disconnectRoom()
+        await reconcileAfterConnectFailure(error)
+        return
+      }
+
+      if (disposed || roomRef.current !== room) {
+        room.disconnect()
+        return
+      }
+
+      if (!attachExistingTrack(room)) {
+        setStatus('waiting_for_host')
+        setMessage(next.state === 'live'
+          ? 'Connected. Waiting for the host screen to appear.'
+          : next.message ?? 'Waiting for the host to start streaming.')
+      }
+
+      schedulePoll(activePollIntervalMs)
+    }
+
+    const pollRoomState = async () => {
+      try {
+        const next = await resolveLatestRoom()
+        if (!next) {
+          return
+        }
+
+        if (isEndedState(next)) {
+          transitionToEnded(next)
+          return
+        }
+
+        if (!roomRef.current) {
+          await connectToRoom(next, true)
+          return
+        }
+
+        schedulePoll(activePollIntervalMs)
+      } catch (error) {
+        if (isDeadRoomError(error)) {
+          transitionToDeadRoom(error)
+          return
+        }
+
+        if (!disposed) {
+          setStatus('disconnected')
+          setMessage('Lost contact with the backend. Retrying while the session is still active.')
+          schedulePoll(disconnectedRetryIntervalMs)
+        }
+      }
     }
 
     const boot = async () => {
       try {
         setStatus('resolving_room')
-        const resolved = await resolveRoom(slug)
-        if (disposed) {
+        setMessage('Resolving room…')
+
+        const next = await resolveLatestRoom()
+        if (!next) {
           return
         }
 
-        setRoomInfo(resolved)
-        setMessage(resolved.message ?? 'Room resolved.')
+        setMessage(next.message ?? 'Room resolved.')
 
-        if (resolved.state === 'ended' || !resolved.viewerToken) {
-          setStatus('ended')
+        if (isEndedState(next)) {
+          transitionToEnded(next)
           return
         }
 
-        setStatus('joining')
-        const room = new Room({
-          adaptiveStream: true,
-          dynacast: false,
-        })
-        roomRef.current = room
-
-        room.on(RoomEvent.TrackSubscribed, (track) => {
-          if (track.kind === Track.Kind.Video && videoRef.current) {
-            track.attach(videoRef.current)
-            setStatus('live')
-            setMessage('Watching the host screen live.')
-          }
-        })
-
-        room.on(RoomEvent.TrackUnsubscribed, () => {
-          if (!disposed) {
-            setStatus('waiting_for_host')
-            setMessage('Waiting for the host to resume or republish their screen.')
-          }
-        })
-
-        room.on(RoomEvent.Disconnected, () => {
-          if (!disposed) {
-            setStatus('disconnected')
-            setMessage('Disconnected from the stream.')
-          }
-        })
-
-        await room.connect(resolved.liveKitUrl, resolved.viewerToken)
-
-        if (!attachExistingTrack()) {
-          setStatus('waiting_for_host')
-          setMessage('Connected. Waiting for the host screen to appear.')
-        }
-
-        startPolling()
+        await connectToRoom(next, false)
       } catch (error) {
+        if (isDeadRoomError(error)) {
+          transitionToDeadRoom(error)
+          return
+        }
+
         if (!disposed) {
           setStatus('error')
           setMessage(getErrorMessage(error))
@@ -152,10 +293,8 @@ export function ViewerPage() {
 
     return () => {
       disposed = true
-      if (pollId) {
-        window.clearInterval(pollId)
-      }
-      disconnect()
+      clearPoll()
+      disconnectRoom()
     }
   }, [slug])
 

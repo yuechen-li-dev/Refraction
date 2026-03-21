@@ -18,7 +18,12 @@ var appOptions = BuildAppOptions(builder.Configuration);
 
 builder.Services.AddSingleton(liveKitOptions);
 builder.Services.AddSingleton(appOptions);
-builder.Services.AddSingleton<IRoomSessionStore, InMemoryRoomSessionStore>();
+var roomSessionOptions = BuildRoomSessionOptions(builder.Configuration);
+builder.Services.AddSingleton(roomSessionOptions);
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<InMemoryRoomSessionStore>();
+builder.Services.AddSingleton<IRoomSessionStore>(static serviceProvider => serviceProvider.GetRequiredService<InMemoryRoomSessionStore>());
+builder.Services.AddHostedService<RoomSessionCleanupService>();
 builder.Services.AddSingleton<ILiveKitTokenService, LiveKitTokenService>();
 
 builder.Services.AddCors(options =>
@@ -96,22 +101,22 @@ app.MapPost("/api/rooms/{slug}/state", (
     UpdateRoomStateRequest request,
     IRoomSessionStore store) =>
 {
-    RoomSession? session = request.State switch
-    {
-        RoomState.Live => store.MarkLive(slug),
-        RoomState.Ended => store.MarkEnded(slug),
-        _ => store.GetBySlug(slug)
-    };
+    var result = store.TryUpdateState(slug, request.State);
 
-    return session is null
-        ? Results.NotFound(new ErrorResponse("room_not_found", "Room link is invalid or has expired.", RoomState.Error))
-        : Results.Ok(new ResolveRoomResponse(
-            session.RoomId,
-            session.RoomSlug,
+    return result.Status switch
+    {
+        RoomStateUpdateStatus.Updated => Results.Ok(new ResolveRoomResponse(
+            result.Session!.RoomId,
+            result.Session.RoomSlug,
             null,
             string.Empty,
-            session.State,
-            session.State == RoomState.Live ? "Host marked the stream live." : "Stream state updated."));
+            result.Session.State,
+            result.Message)),
+        RoomStateUpdateStatus.NotFound => Results.NotFound(new ErrorResponse(result.Code, result.Message, RoomState.Error)),
+        RoomStateUpdateStatus.InvalidTransition => Results.Conflict(new ErrorResponse(result.Code, result.Message, result.Session!.State)),
+        RoomStateUpdateStatus.UnsupportedState => Results.BadRequest(new ErrorResponse(result.Code, result.Message, RoomState.Error)),
+        _ => Results.BadRequest(new ErrorResponse("unsupported_room_state", "Only 'live' and 'ended' state updates are supported.", RoomState.Error))
+    };
 });
 
 app.MapPost("/api/rooms/{slug}/end", (string slug, IRoomSessionStore store) =>
@@ -138,6 +143,17 @@ static LiveKitOptions BuildLiveKitOptions(IConfiguration configuration)
     };
 }
 
+static RoomSessionOptions BuildRoomSessionOptions(IConfiguration configuration)
+{
+    return new RoomSessionOptions
+    {
+        WaitingRoomTtl = GetOptionalTimeSpan(configuration, "ROOM_SESSION_WAITING_TTL_MINUTES", TimeSpan.FromMinutes(15), 1),
+        LiveRoomTtl = GetOptionalTimeSpan(configuration, "ROOM_SESSION_LIVE_TTL_MINUTES", TimeSpan.FromHours(4), 1),
+        EndedRoomRetention = GetOptionalTimeSpan(configuration, "ROOM_SESSION_ENDED_RETENTION_MINUTES", TimeSpan.FromMinutes(10), 1),
+        CleanupInterval = GetOptionalTimeSpan(configuration, "ROOM_SESSION_CLEANUP_INTERVAL_SECONDS", TimeSpan.FromSeconds(30), 1)
+    };
+}
+
 static AppOptions BuildAppOptions(IConfiguration configuration)
 {
     var publicAppBaseUrl = GetRequired(configuration, "PUBLIC_APP_BASE_URL");
@@ -154,6 +170,24 @@ static AppOptions BuildAppOptions(IConfiguration configuration)
         LiveKitUrl = liveKitUrl,
         AllowedOrigins = origins
     };
+}
+
+static TimeSpan GetOptionalTimeSpan(IConfiguration configuration, string key, TimeSpan fallback, double minimumValue)
+{
+    var configuredValue = configuration[key];
+    if (string.IsNullOrWhiteSpace(configuredValue))
+    {
+        return fallback;
+    }
+
+    if (!double.TryParse(configuredValue, out var numericValue) || numericValue < minimumValue)
+    {
+        throw new InvalidOperationException($"Configuration value '{key}' must be a number greater than or equal to {minimumValue}.");
+    }
+
+    return key.EndsWith("_SECONDS", StringComparison.Ordinal)
+        ? TimeSpan.FromSeconds(numericValue)
+        : TimeSpan.FromMinutes(numericValue);
 }
 
 static string GetRequired(IConfiguration configuration, string key)

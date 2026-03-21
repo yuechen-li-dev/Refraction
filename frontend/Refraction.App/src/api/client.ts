@@ -1,13 +1,31 @@
 import type { ApiErrorResponse, CreateRoomResponse, ResolveRoomResponse, RoomState } from '../types/app'
 
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? 'http://localhost:5057'
+export const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? 'http://localhost:5057'
+
+export class ApiRequestError extends Error {
+  readonly code: string
+  readonly state: RoomState
+  readonly status: number
+
+  constructor(status: number, error: ApiErrorResponse) {
+    super(error.message || 'Request failed.')
+    this.name = 'ApiRequestError'
+    this.code = error.code
+    this.state = error.state
+    this.status = status
+  }
+}
 
 async function readJson<T>(response: Response): Promise<T> {
   const body = (await response.json()) as T | ApiErrorResponse
 
   if (!response.ok) {
     const error = body as ApiErrorResponse
-    throw new Error(error.message || 'Request failed.')
+    throw new ApiRequestError(response.status, {
+      code: error.code || 'request_failed',
+      message: error.message || 'Request failed.',
+      state: error.state || 'error',
+    })
   }
 
   return body as T

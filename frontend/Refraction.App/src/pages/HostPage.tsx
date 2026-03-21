@@ -5,7 +5,7 @@ import {
   Track,
 } from 'livekit-client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createRoom, endRoom, updateRoomState } from '../api/client'
+import { apiBaseUrl, createRoom, endRoom, updateRoomState } from '../api/client'
 import { StatusBadge } from '../components/StatusBadge'
 import type { CreateRoomResponse, HostState } from '../types/app'
 
@@ -42,14 +42,43 @@ export function HostPage() {
     sessionRef.current = session
   }, [session])
 
+  useEffect(() => {
+    const notifyEndedOnPageExit = () => {
+      if (isStoppingRef.current || !sessionRef.current) {
+        return
+      }
+
+      const url = `${apiBaseUrl}/api/rooms/${sessionRef.current.roomSlug}/end`
+      const requestBody = new Blob([], { type: 'application/json' })
+
+      if (navigator.sendBeacon?.(url, requestBody)) {
+        return
+      }
+
+      void fetch(url, {
+        method: 'POST',
+        keepalive: true,
+      }).catch(() => undefined)
+    }
+
+    window.addEventListener('pagehide', notifyEndedOnPageExit)
+    window.addEventListener('beforeunload', notifyEndedOnPageExit)
+
+    return () => {
+      window.removeEventListener('pagehide', notifyEndedOnPageExit)
+      window.removeEventListener('beforeunload', notifyEndedOnPageExit)
+    }
+  }, [])
+
   const teardown = useCallback(async (notifyBackend: boolean) => {
     isStoppingRef.current = true
 
     publicationRef.current?.track?.stop()
     publicationRef.current = null
 
-    roomRef.current?.disconnect()
+    const room = roomRef.current
     roomRef.current = null
+    room?.disconnect()
 
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
@@ -70,14 +99,17 @@ export function HostPage() {
     isStoppingRef.current = false
   }, [])
 
-  const stopSharing = useCallback(async () => {
+  const stopSharing = useCallback(async (reason?: string) => {
     if (!sessionRef.current && !streamRef.current && !roomRef.current) {
       setStatus('ended')
+      if (reason) {
+        setError(reason)
+      }
       return
     }
 
     setStatus('stopping')
-    setError(null)
+    setError(reason ?? null)
 
     await teardown(true)
     setStatus('ended')
@@ -110,7 +142,7 @@ export function HostPage() {
       const videoTrack = stream.getVideoTracks()[0]
       videoTrack.onended = () => {
         if (!isStoppingRef.current) {
-          void stopSharing()
+          void stopSharing('Screen sharing stopped.')
         }
       }
 
@@ -132,8 +164,8 @@ export function HostPage() {
       roomRef.current = room
 
       room.on(RoomEvent.Disconnected, () => {
-        if (!isStoppingRef.current) {
-          setStatus('ended')
+        if (!isStoppingRef.current && roomRef.current === room) {
+          void stopSharing('Streaming session disconnected. The room has been closed.')
         }
       })
 
@@ -148,7 +180,7 @@ export function HostPage() {
       await updateRoomState(roomSession.roomSlug, 'live')
       setStatus('live')
     } catch (captureError) {
-      await teardown(false)
+      await teardown(Boolean(sessionRef.current))
       setStatus('error')
       setError(
         captureError instanceof DOMException && captureError.name === 'NotAllowedError'
@@ -177,7 +209,7 @@ export function HostPage() {
     <main className="shell">
       <section className="panel hero-panel">
         <div className="hero-copy">
-          <p className="eyebrow">M0a · one-way screen sharing by link</p>
+          <p className="eyebrow">M0b · demo hardening for one-way screen sharing</p>
           <h1>Refraction</h1>
           <p className="lede">
             Share your screen, get a link, and let a viewer watch. No chat, no audio, no extra chrome.
@@ -192,7 +224,7 @@ export function HostPage() {
             </button>
             <button
               className="button button--secondary"
-              onClick={() => void stopSharing()}
+              onClick={() => void stopSharing('Screen sharing stopped.')}
               disabled={status !== 'live' && status !== 'error' && status !== 'ended'}
             >
               Stop

@@ -8,4 +8,6 @@ public interface IRoomSessionStore
     RoomSession? GetBySlug(string roomSlug);
     RoomSession? MarkLive(string roomSlug);
     RoomSession? MarkEnded(string roomSlug);
+    RoomStateUpdateResult TryUpdateState(string roomSlug, RoomState state);
+    int CleanupExpiredSessions();
 }
