@@ -1,0 +1,52 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "backend", "backend", "{8A9EB2C3-E735-420F-B64B-F495C01E3F07}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Refraction.Api", "backend\Refraction.Api\Refraction.Api.csproj", "{9792A689-1F3B-4471-A3EE-BE0F4EE3526F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Refraction.Api.Tests", "backend\Refraction.Api.Tests\Refraction.Api.Tests.csproj", "{94C04D16-488A-41E9-B8ED-6D6EA366814A}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "frontend", "frontend", "{A1B7F158-EF15-4E5A-B2D5-A1719892A070}"
+	ProjectSection(SolutionItems) = preProject
+		frontend\Refraction.App\package.json = frontend\Refraction.App\package.json
+		frontend\Refraction.App\vite.config.ts = frontend\Refraction.App\vite.config.ts
+		frontend\Refraction.App\.env.example = frontend\Refraction.App\.env.example
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{DE8EB4D0-E0D3-4F40-B706-2D3B5B7A8E1F}"
+	ProjectSection(SolutionItems) = preProject
+		docs\architecture.md = docs\architecture.md
+		README.md = README.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "scripts", "scripts", "{AE2EAB15-55B6-4044-905F-9256345D5013}"
+	ProjectSection(SolutionItems) = preProject
+		scripts\run-local.sh = scripts\run-local.sh
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{9792A689-1F3B-4471-A3EE-BE0F4EE3526F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9792A689-1F3B-4471-A3EE-BE0F4EE3526F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9792A689-1F3B-4471-A3EE-BE0F4EE3526F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9792A689-1F3B-4471-A3EE-BE0F4EE3526F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{94C04D16-488A-41E9-B8ED-6D6EA366814A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{94C04D16-488A-41E9-B8ED-6D6EA366814A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{94C04D16-488A-41E9-B8ED-6D6EA366814A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{94C04D16-488A-41E9-B8ED-6D6EA366814A}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{9792A689-1F3B-4471-A3EE-BE0F4EE3526F} = {8A9EB2C3-E735-420F-B64B-F495C01E3F07}
+		{94C04D16-488A-41E9-B8ED-6D6EA366814A} = {8A9EB2C3-E735-420F-B64B-F495C01E3F07}
+	EndGlobalSection
+EndGlobal
