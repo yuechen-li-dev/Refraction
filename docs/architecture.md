@@ -1,10 +1,10 @@
-# Refraction M0b architecture
+# Refraction M0 / M0.5 architecture
 
 ## System overview
 
-Refraction M0b keeps the same two-part architecture as M0a: a React frontend for the host and viewer UX, and an ASP.NET Core minimal API that creates ephemeral room sessions, tracks lightweight room state in memory, and mints narrowly scoped LiveKit tokens. The host captures display video with the browser screen-capture API, publishes that video into a LiveKit room, and viewers join the same room as passive subscribers through a slug-based link.
+Refraction keeps the same two-part architecture established in M0a and hardened through M0b: a React frontend for the host and viewer UX, and an ASP.NET Core minimal API that creates ephemeral room sessions, tracks lightweight room state in memory, and mints narrowly scoped LiveKit tokens. The host captures display video with the browser screen-capture API, publishes that video into a LiveKit room, and viewers join the same room as passive subscribers through a slug-based link.
 
-M0b is a hardening pass, not a product expansion. The main changes are explicit in-memory session expiration, cleaner ended/dead transitions, and more resilient viewer reconnect/disconnect handling.
+M0c does not add product scope. It is the final milestone-proof pass over the M0/M0.5 slice, keeping the same architecture while verifying explicit in-memory session expiration, cleaner ended/dead transitions, and resilient viewer reconnect/disconnect handling.
 
 ## Route summary
 
@@ -146,7 +146,7 @@ Notes:
 
 ## Session/state storage
 
-Refraction still uses a process-local in-memory room store backed by a concurrent dictionary. There is still no database and no durable persistence layer. M0b adds an explicit lifecycle policy around that store:
+Refraction still uses a process-local in-memory room store backed by a concurrent dictionary. There is still no database and no durable persistence layer. The hardened slice adds an explicit lifecycle policy around that store:
 
 - Waiting sessions expire after `ROOM_SESSION_WAITING_TTL_MINUTES` (default 15 minutes).
 - Live sessions auto-transition to `ended` after `ROOM_SESSION_LIVE_TTL_MINUTES` (default 240 minutes).
@@ -158,7 +158,7 @@ This means room links do not accumulate forever, abandoned rooms stop presenting
 
 ## Viewer end/disconnect semantics
 
-M0b intentionally keeps the signaling path simple:
+The M0/M0.5 slice intentionally keeps the signaling path simple:
 
 - The backend remains the source of truth for whether a session is `waiting`, `live`, or `ended`.
 - The viewer still listens to LiveKit track and disconnect events for immediate media feedback.
@@ -190,7 +190,7 @@ This is less clever than a dedicated realtime control channel, but it is explici
 
 This keeps the product contract explicit: viewers are passive subscribers only.
 
-## Remaining limitations after M0b
+## Remaining limitations after M0 / M0.5 closure
 
 - Process restarts still invalidate active sessions because there is no persistence layer.
 - There is still no dedicated realtime control plane for session-end signaling.

@@ -209,7 +209,7 @@ export function HostPage() {
     <main className="shell">
       <section className="panel hero-panel">
         <div className="hero-copy">
-          <p className="eyebrow">M0b · demo hardening for one-way screen sharing</p>
+          <p className="eyebrow">M0 / M0.5 closure · one-way screen sharing sign-off path</p>
           <h1>Refraction</h1>
           <p className="lede">
             Share your screen, get a link, and let a viewer watch. No chat, no audio, no extra chrome.
@@ -252,7 +252,7 @@ export function HostPage() {
         <article className="panel panel--stack">
           <div className="panel-header">
             <h2>Viewer link</h2>
-            <p>Open this in another desktop Chromium window or profile.</p>
+            <p>Open this in another desktop Chromium window or browser profile.</p>
           </div>
 
           <div className="link-card">
