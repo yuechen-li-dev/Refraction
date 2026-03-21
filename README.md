@@ -1,17 +1,19 @@
 # Refraction
 
-Refraction is a brutally minimal one-way screen streaming app. A host opens the app, clicks **Share screen**, gets a link, and a viewer opens that link to watch the live screen stream in a browser. M0b keeps the same narrow product surface as M0a and focuses only on making that demo path harder to embarrass in live use.
+Refraction is a brutally minimal one-way screen streaming app. A host opens the app, clicks **Share screen**, gets a link, and a viewer opens that link to watch the live screen stream in a browser.
 
-## Milestone: M0b demo hardening
+M0a and M0b delivered the narrow product slice. M0c is the final proof-and-polish pass: one coherent fresh-local-run path, docs/scripts/env alignment, explicit validation, and milestone sign-off evidence.
 
-This repository now implements the hardened demo slice:
+## Milestone status: M0 / M0.5 closure
+
+The implementation remains intentionally narrow:
 
 - Host route at `/`.
 - Viewer route at `/r/:slug`.
-- ASP.NET Core minimal API for ephemeral room creation and viewer resolution.
+- ASP.NET Core minimal API for ephemeral room creation, viewer resolution, and room state transitions.
 - Server-side LiveKit token minting.
 - In-memory session state only, with explicit cleanup and expiration rules.
-- Local validation target: 1 host + passive viewers.
+- Local validation target: **1 host + passive viewers**.
 
 ## Tech stack
 
@@ -22,7 +24,7 @@ This repository now implements the hardened demo slice:
 
 ## Supported browsers
 
-Refraction still targets **desktop Chromium browsers first** for the host flow, because screen capture support is the product-critical path.
+Refraction targets **desktop Chromium browsers first** for the host flow, because screen capture support is the product-critical path.
 
 ## Prerequisites
 
@@ -34,19 +36,81 @@ Refraction still targets **desktop Chromium browsers first** for the host flow, 
   - a self-hosted LiveKit server.
 - Two desktop Chromium browser contexts for demoing host and viewer locally.
 
-## Required environment variables
+## Single blessed fresh-local-run path
+
+This is the one local workflow the repo now treats as canonical.
+
+### 1. Copy the env templates
+
+```bash
+cd /workspace/Refraction
+cp backend/Refraction.Api/.env.example backend/Refraction.Api/.env
+cp frontend/Refraction.App/.env.example frontend/Refraction.App/.env
+```
+
+### 2. Edit `backend/Refraction.Api/.env`
+
+Set the required backend values:
+
+```dotenv
+LIVEKIT_URL=wss://your-livekit-host
+LIVEKIT_API_KEY=your-livekit-api-key
+LIVEKIT_API_SECRET=your-livekit-api-secret
+PUBLIC_APP_BASE_URL=http://localhost:5173
+CORS_ALLOWED_ORIGINS=http://localhost:5173
+```
+
+You can keep the session lifecycle defaults unless you are intentionally testing expiry behavior:
+
+```dotenv
+ROOM_SESSION_WAITING_TTL_MINUTES=15
+ROOM_SESSION_LIVE_TTL_MINUTES=240
+ROOM_SESSION_ENDED_RETENTION_MINUTES=10
+ROOM_SESSION_CLEANUP_INTERVAL_SECONDS=30
+```
+
+### 3. Confirm `frontend/Refraction.App/.env`
+
+For the default local setup, this should stay:
+
+```dotenv
+VITE_API_BASE_URL=http://localhost:5057
+```
+
+### 4. Run the helper script
+
+```bash
+cd /workspace/Refraction
+./scripts/run-local.sh
+```
+
+What the script does:
+
+- sources `backend/Refraction.Api/.env` if present,
+- sources `frontend/Refraction.App/.env` if present,
+- uses backend `http://localhost:5057`,
+- uses frontend `http://localhost:5173`,
+- starts the ASP.NET Core API with `dotnet run`,
+- runs `npm install`,
+- starts the Vite dev server.
+
+If you stay on the default ports above, the README, env templates, backend launch settings, frontend fallback API URL, and `scripts/run-local.sh` all match.
+
+## Environment details
 
 ### Backend: `backend/Refraction.Api/.env.example`
 
-This file is a template only. ASP.NET Core does **not** load it automatically in this repo. Either export these values in your shell, or copy it to `backend/Refraction.Api/.env` and source that file before running the API or `scripts/run-local.sh`:
+This file is a template only. ASP.NET Core does **not** load it automatically in this repo. The blessed run path works because `scripts/run-local.sh` sources it before starting the API.
+
+Required values:
 
 - `LIVEKIT_URL`: public WebSocket URL for your LiveKit deployment, for example `wss://your-project.livekit.cloud`.
 - `LIVEKIT_API_KEY`: LiveKit API key.
 - `LIVEKIT_API_SECRET`: LiveKit API secret.
-- `PUBLIC_APP_BASE_URL`: public URL where the React app is served locally, usually `http://localhost:5173`.
-- `CORS_ALLOWED_ORIGINS`: comma-separated allowed frontend origins. For local dev this can stay `http://localhost:5173`.
+- `PUBLIC_APP_BASE_URL`: public URL where the React app is served locally. Default local value: `http://localhost:5173`.
+- `CORS_ALLOWED_ORIGINS`: comma-separated allowed frontend origins. Default local value: `http://localhost:5173`.
 
-Optional session-hardening overrides:
+Optional session lifecycle overrides:
 
 - `ROOM_SESSION_WAITING_TTL_MINUTES`: how long an unstarted room link survives before expiring. Default: `15`.
 - `ROOM_SESSION_LIVE_TTL_MINUTES`: maximum time an active room can remain live before the backend auto-ends it. Default: `240`.
@@ -55,77 +119,26 @@ Optional session-hardening overrides:
 
 ### Frontend: `frontend/Refraction.App/.env.example`
 
-Vite does load frontend `.env` files automatically in local development.
+Vite loads frontend `.env` files automatically in local development, and `scripts/run-local.sh` also sources the file so the script path and direct `npm run dev` path stay aligned.
 
-- `VITE_API_BASE_URL`: backend base URL, usually `http://localhost:5057`.
+- `VITE_API_BASE_URL`: backend base URL. Default local value: `http://localhost:5057`.
 
-## Exact local run steps
+## Manual smoke-test checklist
 
-### 1. Configure environment variables
+Use this after starting the app locally:
 
-Example shell session:
-
-```bash
-export LIVEKIT_URL="wss://your-livekit-host"
-export LIVEKIT_API_KEY="your-livekit-api-key"
-export LIVEKIT_API_SECRET="your-livekit-api-secret"
-export PUBLIC_APP_BASE_URL="http://localhost:5173"
-export CORS_ALLOWED_ORIGINS="http://localhost:5173"
-export VITE_API_BASE_URL="http://localhost:5057"
-```
-
-Or, for the provided helper script, copy the example files and edit them in place:
-
-```bash
-cp backend/Refraction.Api/.env.example backend/Refraction.Api/.env
-cp frontend/Refraction.App/.env.example frontend/Refraction.App/.env
-```
-
-### 2. Run the backend
-
-```bash
-cd /workspace/Refraction/backend/Refraction.Api
-dotnet run --urls http://localhost:5057
-```
-
-The backend launch profile, frontend fallback API URL, and helper script all use port `5057` by default.
-
-### 3. Run the frontend
-
-In a second terminal:
-
-```bash
-cd /workspace/Refraction/frontend/Refraction.App
-npm install
-npm run dev -- --host 0.0.0.0 --port 5173
-```
-
-### 4. Demo the local happy path
-
-1. Open `http://localhost:5173/` in desktop Chromium.
-2. Click **Share screen**.
-3. Approve browser display capture.
-4. Wait for the status to become **Live**.
-5. Copy the generated viewer link.
-6. Open that link in a second Chromium window, tab, or browser profile.
-7. Confirm the viewer sees the host screen.
-8. Refresh the viewer while the host is still live and confirm it re-resolves the slug and rejoins cleanly.
-9. Stop screen sharing from the app or the browser capture UI.
-10. Confirm the viewer lands in the ended state, then later becomes invalid/expired after the retention window passes.
-
-## What is hardened in M0b
-
-- Backend in-memory sessions no longer accumulate forever.
-- Waiting sessions expire automatically if the host never goes live.
-- Live sessions are auto-ended after a bounded maximum lifetime so abandoned demo rooms stop looking active forever.
-- Ended sessions stay resolvable briefly, then are cleaned up into a dead/expired state.
-- Viewer refresh during an active session re-resolves the room and rejoins with a fresh viewer token.
-- Viewer disconnect handling now rechecks backend room state before deciding whether to show `ended`, retry, or reconnect.
-- Host teardown now makes a best-effort end call even when room creation or LiveKit connection fails after the room slug already exists.
+- [ ] Host opens `http://localhost:5173/` and clicks **Share screen**.
+- [ ] Browser capture permission is granted and the host status reaches **Live**.
+- [ ] Viewer opens the generated `/r/:slug` link.
+- [ ] Viewer sees the host screen live.
+- [ ] Viewer refreshes during the active session and rejoins correctly.
+- [ ] Host stops sharing from the app or browser capture UI.
+- [ ] Viewer sees the ended/dead terminal state rather than a hanging live state.
+- [ ] An invalid or fully expired link shows a sane terminal message.
 
 ## Session lifecycle and cleanup behavior
 
-The API keeps sessions only in memory, but M0b makes that lifecycle explicit:
+The API keeps sessions only in memory, with explicit lifecycle rules:
 
 1. `POST /api/rooms` creates a session in `waiting`.
 2. If the host successfully publishes, the frontend marks the room `live`.
@@ -173,7 +186,7 @@ Notes:
 
 ### `POST /api/rooms/{slug}/state`
 
-Used by the host client to mark a stream `live` or `ended`. Invalid or stale transitions now fail explicitly:
+Used by the host client to mark a stream `live` or `ended`.
 
 - `400` for unsupported target states.
 - `404` when the room is already missing or expired.
@@ -202,23 +215,41 @@ npm run lint
 npm run build
 ```
 
-## Known limitations after M0b
+## Requirement / status evidence table
+
+### M0 requirements
+
+| Requirement | Status | Evidence / notes |
+| --- | --- | --- |
+| Host can start one-way desktop screen sharing from `/`. | Complete | Host flow is implemented in the React host page using browser display capture plus LiveKit publish. |
+| Host receives a viewer link for the active session. | Complete | Room creation returns `viewerUrl`, and the host UI exposes copyable link output. |
+| Viewer can open `/r/:slug` and watch passively. | Complete | Viewer route resolves the slug, joins with a viewer token, and subscribes without any upstream controls. |
+| Local run works with a minimal backend + frontend setup. | Complete | README, env templates, backend defaults, frontend defaults, and `scripts/run-local.sh` now all point at the same `5173`/`5057` local path. |
+| Scope stays intentionally narrow. | Complete | No auth, chat, audio, recording, persistence, multi-host, mobile, or deployment workflow is added. |
+
+### M0.5 requirements
+
+| Requirement | Status | Evidence / notes |
+| --- | --- | --- |
+| Waiting, live, ended, and invalid/expired room states are explicit. | Complete | API responses and viewer UI differentiate waiting/live/ended/error states with terminal copy. |
+| Viewer refresh during an active session rejoins cleanly. | Complete | Viewer page re-resolves the slug and reconnects with a fresh viewer token. |
+| Ended rooms do not look live forever. | Complete | Host stop, disconnect, page exit, explicit end, and maximum live TTL all converge on ended state handling. |
+| Dead links resolve to a sane terminal state. | Complete | Missing/expired rooms return `room_not_found`, and the viewer lands in a terminal ended/error-style state instead of spinning forever. |
+| In-memory room state is bounded and cleaned up. | Complete | Waiting TTL, live TTL, ended retention, and background cleanup make process-local storage auditable and finite. |
+| Local validation is explicit and repeatable. | Complete | README lists the exact backend/frontend validation commands plus a manual smoke-test checklist. |
+
+## Known limitations after M0 / M0.5 closure
 
 - Refraction still depends on an already-running LiveKit deployment; this repo does not provision LiveKit.
 - Session state is still process-local and in-memory only. Restarting the API invalidates active slugs immediately.
-- Viewer end/disconnect handling is more deliberate, but it still relies on lightweight backend polling plus LiveKit events rather than a dedicated realtime control channel.
 - The app still targets a single host and passive viewers only.
-- No auth, chat, audio, recording, persistence, or admin surface has been added.
+- No auth, chat, audio, recording, persistence, admin surface, multi-host support, mobile support, or deployment workflow has been added.
 - Frontend production build may still emit a chunk-size warning because `livekit-client` and the app ship in the same main bundle.
-
-## Convenience local runner
-
-`./scripts/run-local.sh` now keeps the default ports aligned (`5173` frontend, `5057` backend), uses `dotnet` from your PATH or `DOTNET_BIN`, and will source `backend/Refraction.Api/.env` plus `frontend/Refraction.App/.env` if those files exist.
 
 ## Repository layout
 
 - `frontend/Refraction.App`: React + Vite client.
 - `backend/Refraction.Api`: ASP.NET Core minimal API.
 - `backend/Refraction.Api.Tests`: backend unit tests.
-- `docs/architecture.md`: M0b architecture notes.
-- `scripts/run-local.sh`: convenience launcher outline.
+- `docs/architecture.md`: architecture notes for the hardened slice.
+- `scripts/run-local.sh`: blessed local runner.
