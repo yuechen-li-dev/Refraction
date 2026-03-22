@@ -1,10 +1,10 @@
 # Refraction
 
-Refraction is a brutally minimal one-way screen streaming app. A host opens the app, clicks **Share screen**, gets a link, and a viewer opens that link to watch the live screen stream in a browser.
+Refraction is a brutally minimal one-way screen streaming app. A host opens the app, clicks **Share screen**, gets a link, and viewers open that link to watch the live screen stream in a browser.
 
-M0a and M0b delivered the narrow product slice. M0c is the final proof-and-polish pass: one coherent fresh-local-run path, docs/scripts/env alignment, explicit validation, and milestone sign-off evidence.
+M0a, M0b, and M0c delivered the narrow product slice and hardening pass. M1 keeps the same product shape while expanding the existing link flow from one passive viewer to many concurrent passive viewers.
 
-## Milestone status: M0 / M0.5 closure
+## Milestone status: M1
 
 The implementation remains intentionally narrow:
 
@@ -13,7 +13,7 @@ The implementation remains intentionally narrow:
 - ASP.NET Core minimal API for ephemeral room creation, viewer resolution, and room state transitions.
 - Server-side LiveKit token minting.
 - In-memory session state only, with explicit cleanup and expiration rules.
-- Local validation target: **1 host + passive viewers**.
+- Local validation target: **1 host + many passive viewers**.
 
 ## Tech stack
 
@@ -34,7 +34,7 @@ Refraction targets **desktop Chromium browsers first** for the host flow, becaus
 - A reachable LiveKit deployment, either:
   - LiveKit Cloud, or
   - a self-hosted LiveKit server.
-- Two desktop Chromium browser contexts for demoing host and viewer locally.
+- Multiple desktop Chromium browser contexts for demoing host and viewers locally.
 
 ## Single blessed fresh-local-run path
 
@@ -129,9 +129,10 @@ Use this after starting the app locally:
 
 - [ ] Host opens `http://localhost:5173/` and clicks **Share screen**.
 - [ ] Browser capture permission is granted and the host status reaches **Live**.
-- [ ] Viewer opens the generated `/r/:slug` link.
-- [ ] Viewer sees the host screen live.
-- [ ] Viewer refreshes during the active session and rejoins correctly.
+- [ ] Viewer A opens the generated `/r/:slug` link.
+- [ ] Viewer B opens the same `/r/:slug` link concurrently.
+- [ ] Both viewers see the host screen live.
+- [ ] One viewer refreshes during the active session and rejoins correctly without affecting the other viewer.
 - [ ] Host stops sharing from the app or browser capture UI.
 - [ ] Viewer sees the ended/dead terminal state rather than a hanging live state.
 - [ ] An invalid or fully expired link shows a sane terminal message.
@@ -166,7 +167,7 @@ Creates a room session and returns:
 
 ### `GET /api/rooms/{slug}`
 
-Resolves a viewer link and returns:
+Resolves a viewer link and returns a fresh passive-viewer token for each active viewer join attempt:
 
 ```json
 {
@@ -182,6 +183,7 @@ Resolves a viewer link and returns:
 Notes:
 
 - `viewerToken` is `null` once the backend considers the room ended.
+- Multiple concurrent viewers can resolve the same slug independently; each successful resolve receives its own subscribe-only token for the same room.
 - After the ended-retention window passes, the same slug returns a `room_not_found` error because the dead session has been cleaned up.
 
 ### `POST /api/rooms/{slug}/state`
@@ -238,11 +240,19 @@ npm run build
 | In-memory room state is bounded and cleaned up. | Complete | Waiting TTL, live TTL, ended retention, and background cleanup make process-local storage auditable and finite. |
 | Local validation is explicit and repeatable. | Complete | README lists the exact backend/frontend validation commands plus a manual smoke-test checklist. |
 
-## Known limitations after M0 / M0.5 closure
+### M1 requirements
+
+| Requirement | Status | Evidence / notes |
+| --- | --- | --- |
+| One host can serve many concurrent passive viewers through the same link. | Complete | Repeated room resolution for the same slug now remains an explicit supported path, with a fresh subscribe-only viewer token minted for each active join attempt. |
+| Existing waiting/live/ended/dead behavior remains intact. | Complete | M1 keeps the same frontend state machine and backend lifecycle semantics; it only broadens the existing passive-viewer path to multiple concurrent viewers. |
+| Permission boundaries stay narrow. | Complete | Viewer tokens remain subscribe-only and host tokens remain publish-only. |
+
+## Known limitations after M1
 
 - Refraction still depends on an already-running LiveKit deployment; this repo does not provision LiveKit.
 - Session state is still process-local and in-memory only. Restarting the API invalidates active slugs immediately.
-- The app still targets a single host and passive viewers only.
+- The app still targets exactly one host and passive viewers only.
 - No auth, chat, audio, recording, persistence, admin surface, multi-host support, mobile support, or deployment workflow has been added.
 - Frontend production build may still emit a chunk-size warning because `livekit-client` and the app ship in the same main bundle.
 

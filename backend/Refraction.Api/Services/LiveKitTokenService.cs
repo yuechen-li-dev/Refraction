@@ -6,6 +6,7 @@ namespace Refraction.Api.Services;
 
 public sealed class LiveKitTokenService : ILiveKitTokenService
 {
+    private const int MaxRoomParticipants = 128;
     private readonly LiveKitOptions options;
     private readonly RoomServiceClient roomServiceClient;
     private readonly ILogger<LiveKitTokenService> logger;
@@ -62,7 +63,7 @@ public sealed class LiveKitTokenService : ILiveKitTokenService
                 Name = session.RoomId,
                 EmptyTimeout = 60 * 15,
                 DepartureTimeout = 15,
-                MaxParticipants = 32
+                MaxParticipants = MaxRoomParticipants
             });
         }
         catch (Exception exception) when (exception.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase))

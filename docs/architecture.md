@@ -1,10 +1,10 @@
-# Refraction M0 / M0.5 architecture
+# Refraction M1 architecture
 
 ## System overview
 
-Refraction keeps the same two-part architecture established in M0a and hardened through M0b: a React frontend for the host and viewer UX, and an ASP.NET Core minimal API that creates ephemeral room sessions, tracks lightweight room state in memory, and mints narrowly scoped LiveKit tokens. The host captures display video with the browser screen-capture API, publishes that video into a LiveKit room, and viewers join the same room as passive subscribers through a slug-based link.
+Refraction keeps the same two-part architecture established in M0a and hardened through M0c: a React frontend for the host and viewer UX, and an ASP.NET Core minimal API that creates ephemeral room sessions, tracks lightweight room state in memory, and mints narrowly scoped LiveKit tokens. The host captures display video with the browser screen-capture API, publishes that video into a LiveKit room, and viewers join the same room as passive subscribers through a slug-based link.
 
-M0c does not add product scope. It is the final milestone-proof pass over the M0/M0.5 slice, keeping the same architecture while verifying explicit in-memory session expiration, cleaner ended/dead transitions, and resilient viewer reconnect/disconnect handling.
+M1 does not redesign the product. It keeps the same host flow, the same viewer link flow, and the same lifecycle semantics, while allowing multiple concurrent passive viewers to resolve and join the same host session independently.
 
 ## Route summary
 
@@ -50,7 +50,7 @@ Responsibilities:
 - Validate the slug.
 - Normalize the session lifecycle before returning it.
 - Auto-end stale live rooms that exceeded the configured live TTL.
-- Mint a fresh viewer token when the room is still active.
+- Mint a fresh viewer token for each active viewer resolve when the room is still active.
 - Return a clean not-found payload for invalid or fully expired links.
 
 Response shape:
@@ -90,16 +90,17 @@ Responsibilities:
 8. Host connects to LiveKit and publishes the display video track.
 9. Host calls `POST /api/rooms/{slug}/state` with `live`.
 10. Viewer opens `/r/:slug`.
-11. Viewer calls `GET /api/rooms/{slug}` and receives a fresh viewer token if the room is still active.
-12. Viewer joins LiveKit as a subscriber only.
-13. Viewer either:
+11. Each viewer calls `GET /api/rooms/{slug}` and receives a fresh viewer token if the room is still active.
+12. Each viewer joins LiveKit as a subscriber only.
+13. Each viewer either:
     - waits for a published host track, or
     - immediately starts rendering live video.
-14. While active, the viewer runs lightweight backend polling to keep backend session state and LiveKit state aligned.
-15. If LiveKit disconnects but the backend still reports an active room, the viewer re-resolves the slug and reconnects with a fresh viewer token.
-16. If the host stops sharing, closes the page, or the browser ends the display track, the host page triggers backend end cleanup (including a best-effort page-exit beacon).
-17. The session transitions to `ended`, viewers show a human-readable ended state, and the slug remains resolvable for the configured ended-retention window.
-18. After that retention window, background cleanup removes the dead session and the slug becomes invalid/expired.
+14. While active, each viewer runs lightweight backend polling to keep backend session state and LiveKit state aligned.
+15. If LiveKit disconnects but the backend still reports an active room, that viewer re-resolves the slug and reconnects with a fresh viewer token.
+16. Other viewers do not mutate one another's backend state; they only consume the same room metadata and passive access path.
+17. If the host stops sharing, closes the page, or the browser ends the display track, the host page triggers backend end cleanup (including a best-effort page-exit beacon).
+18. The session transitions to `ended`, viewers show a human-readable ended state, and the slug remains resolvable for the configured ended-retention window.
+19. After that retention window, background cleanup removes the dead session and the slug becomes invalid/expired.
 
 ## State model summary
 
@@ -158,16 +159,23 @@ This means room links do not accumulate forever, abandoned rooms stop presenting
 
 ## Viewer end/disconnect semantics
 
-The M0/M0.5 slice intentionally keeps the signaling path simple:
+The current slice intentionally keeps the signaling path simple:
 
 - The backend remains the source of truth for whether a session is `waiting`, `live`, or `ended`.
 - The viewer still listens to LiveKit track and disconnect events for immediate media feedback.
-- A bounded polling loop re-resolves the room every few seconds only while the viewer is in an active session flow.
-- On LiveKit disconnect or track loss, the viewer does not immediately assume the session ended. It first rechecks backend session state.
+- A bounded polling loop re-resolves the room every few seconds only while each viewer is in an active session flow.
+- On LiveKit disconnect or track loss, a viewer does not immediately assume the session ended. It first rechecks backend session state.
 - If the backend now reports `ended` or `room_not_found`, the viewer moves into a terminal ended/dead state instead of looping reconnect attempts.
 - If the backend still reports an active room, the viewer reconnects with a fresh viewer token.
 
 This is less clever than a dedicated realtime control channel, but it is explicit, easy to reason about, and aligned with the current architecture.
+
+## M1 multi-viewer notes
+
+- The backend room store still tracks session lifecycle only; it does not maintain a participant roster or presence system.
+- Multiple viewers can resolve the same slug concurrently because `GET /api/rooms/{slug}` is a read-style operation over shared session state plus fresh viewer-token minting.
+- Viewer tokens remain subscribe-only, so passive viewers cannot publish tracks upstream or interfere with the host stream.
+- The LiveKit room creation path now uses a larger participant ceiling so the same link can support more than the original narrow demo pairing without changing the product model.
 
 ## Local development defaults
 
@@ -190,7 +198,7 @@ This is less clever than a dedicated realtime control channel, but it is explici
 
 This keeps the product contract explicit: viewers are passive subscribers only.
 
-## Remaining limitations after M0 / M0.5 closure
+## Remaining limitations after M1
 
 - Process restarts still invalidate active sessions because there is no persistence layer.
 - There is still no dedicated realtime control plane for session-end signaling.
