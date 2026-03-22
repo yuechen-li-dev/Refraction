@@ -1,10 +1,10 @@
-# Refraction M1 architecture
+# Refraction M3 architecture
 
 ## System overview
 
-Refraction keeps the same two-part architecture established in M0a and hardened through M0c: a React frontend for the host and viewer UX, and an ASP.NET Core minimal API that creates ephemeral room sessions, tracks lightweight room state in memory, and mints narrowly scoped LiveKit tokens. The host captures display video with the browser screen-capture API, publishes that video into a LiveKit room, and viewers join the same room as passive subscribers through a slug-based link.
+Refraction keeps the same basic split established in earlier milestones: a React frontend for the host and viewer UX, and an ASP.NET Core backend that owns ephemeral room state. M3 preserves that shape while adding one small realtime path for chat through SignalR. The host still captures display video with the browser screen-capture API, publishes that video into LiveKit, and viewers still join as passive subscribers through a slug-based link. Chat is attached to that same room slug and exists only in process memory for the life of the active session.
 
-M1 does not redesign the product. It keeps the same host flow, the same viewer link flow, and the same lifecycle semantics, while allowing multiple concurrent passive viewers to resolve and join the same host session independently.
+M3 does not redesign the product. It keeps the same host flow, the same viewer link flow, the same waiting/live/ended/dead lifecycle semantics, and adds only a bounded session-native chat panel for the host and viewers already inside the room.
 
 ## Route summary
 
@@ -20,6 +20,7 @@ M1 does not redesign the product. It keeps the same host flow, the same viewer l
 - `GET /api/rooms/{slug}`: resolve a viewer-facing room slug.
 - `POST /api/rooms/{slug}/state`: mark a room `live` or `ended` from the host client.
 - `POST /api/rooms/{slug}/end`: explicitly end a room session.
+- `GET|POST /hubs/chat`: SignalR hub endpoint for session-scoped room chat.
 
 ## Backend endpoint summary
 
@@ -78,6 +79,21 @@ Responsibilities:
 - Explicitly mark a room ended when the host stops sharing.
 - Support best-effort cleanup when the host session fails after slug creation but before steady-state streaming.
 
+## Realtime chat layer
+
+M3 adds one small SignalR hub that is intentionally subordinate to the existing room/session model rather than becoming a separate chat product.
+
+Responsibilities:
+
+- Accept a room slug plus temporary display name for a session-scoped join.
+- Reject missing, expired, and ended rooms instead of allowing zombie chat traffic.
+- Keep only a small recent-message buffer per room in memory.
+- Broadcast user messages in near real time to everyone joined to the same slug.
+- Emit small system messages when the stream starts or ends.
+- Clear chat buffers when rooms end or are cleaned up.
+
+The backend still does not persist chat history, identities, or presence. Temporary display names are just connection-local labels supplied by the current browser client.
+
 ## Room/session lifecycle summary
 
 1. Host opens `/`.
@@ -99,8 +115,10 @@ Responsibilities:
 15. If LiveKit disconnects but the backend still reports an active room, that viewer re-resolves the slug and reconnects with a fresh viewer token.
 16. Other viewers do not mutate one another's backend state; they only consume the same room metadata and passive access path.
 17. If the host stops sharing, closes the page, or the browser ends the display track, the host page triggers backend end cleanup (including a best-effort page-exit beacon).
-18. The session transitions to `ended`, viewers show a human-readable ended state, and the slug remains resolvable for the configured ended-retention window.
-19. After that retention window, background cleanup removes the dead session and the slug becomes invalid/expired.
+18. Host and viewers can join the SignalR room chat with a temporary display name while the room remains `waiting` or `live`.
+19. The chat hub replays only a small recent in-memory buffer to late joiners during that active session.
+20. When the session transitions to `ended`, the backend broadcasts a terminal chat system message, closes active chat clients, and clears the chat buffer.
+21. After the ended-retention window, background cleanup removes the dead session and any leftover inactive chat state, and the slug becomes invalid/expired.
 
 ## State model summary
 
@@ -155,11 +173,11 @@ Refraction still uses a process-local in-memory room store backed by a concurren
 - A background cleanup service runs every `ROOM_SESSION_CLEANUP_INTERVAL_SECONDS` (default 30 seconds).
 - Request-time normalization enforces the same rules even if a cleanup sweep has not run yet.
 
-This means room links do not accumulate forever, abandoned rooms stop presenting as live forever, and recently ended rooms still have a clear grace window for viewer feedback.
+This means room links do not accumulate forever, abandoned rooms stop presenting as live forever, recently ended rooms still have a clear grace window for viewer feedback, and chat memory is bounded to the same lifecycle.
 
 ## Viewer end/disconnect semantics
 
-The current slice intentionally keeps the signaling path simple:
+The media/session control path intentionally stays simple even after chat is added:
 
 - The backend remains the source of truth for whether a session is `waiting`, `live`, or `ended`.
 - The viewer still listens to LiveKit track and disconnect events for immediate media feedback.
@@ -168,7 +186,7 @@ The current slice intentionally keeps the signaling path simple:
 - If the backend now reports `ended` or `room_not_found`, the viewer moves into a terminal ended/dead state instead of looping reconnect attempts.
 - If the backend still reports an active room, the viewer reconnects with a fresh viewer token.
 
-This is less clever than a dedicated realtime control channel, but it is explicit, easy to reason about, and aligned with the current architecture.
+This remains explicit and easy to reason about. Chat gets its own small realtime path, but room lifecycle truth still comes from the existing backend session model rather than from ad hoc chat presence.
 
 ## M1 multi-viewer notes
 
@@ -198,10 +216,10 @@ This is less clever than a dedicated realtime control channel, but it is explici
 
 This keeps the product contract explicit: viewers are passive subscribers only.
 
-## Remaining limitations after M1
+## Remaining limitations after M3
 
-- Process restarts still invalidate active sessions because there is no persistence layer.
-- There is still no dedicated realtime control plane for session-end signaling.
-- There is still no authentication, chat, audio, recording, or broader room-management surface.
+- Process restarts still invalidate active sessions and erase chat because there is no persistence layer.
+- Chat is intentionally basic: user messages, tiny system messages, temporary names, and a bounded recent buffer only.
+- There is still no authentication, durable identity, DMs, reactions, audio, recording, or broader room-management surface.
 - Live-session auto-ending uses a maximum TTL, not a heartbeat-driven inactivity detector.
 - Mobile broadcasting and multi-host scenarios remain out of scope.

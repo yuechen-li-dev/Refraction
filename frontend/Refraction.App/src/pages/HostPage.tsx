@@ -6,6 +6,7 @@ import {
 } from 'livekit-client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiBaseUrl, createRoom, endRoom, updateRoomState } from '../api/client'
+import { ChatPanel } from '../components/ChatPanel'
 import { StatusBadge } from '../components/StatusBadge'
 import type { CreateRoomResponse, HostState } from '../types/app'
 
@@ -209,10 +210,10 @@ export function HostPage() {
     <main className="shell">
       <section className="panel hero-panel">
         <div className="hero-copy">
-          <p className="eyebrow">M1 · one host, many passive viewers</p>
+          <p className="eyebrow">M3 · one host, many viewers, ephemeral room chat</p>
           <h1>Refraction</h1>
           <p className="lede">
-            Share your screen, get a link, and let viewers watch. No chat, no audio, no extra chrome.
+            Share your screen, get a link, let viewers watch, and exchange live room chat while the session is active.
           </p>
           <div className="hero-actions">
             <button
@@ -272,14 +273,22 @@ export function HostPage() {
             </div>
             <div>
               <span>Transport</span>
-              <strong>LiveKit video only</strong>
+              <strong>LiveKit video + ephemeral chat</strong>
             </div>
             <div>
               <span>Scope</span>
-              <strong>1 host → passive viewers</strong>
+              <strong>1 host → viewers + room chat</strong>
             </div>
           </div>
         </article>
+
+        <ChatPanel
+          key={session?.roomSlug ?? "host-chat"}
+          title="Room chat"
+          roomSlug={session?.roomSlug ?? null}
+          roomState={session ? (status === 'ended' || status === 'error' ? 'ended' : status === 'live' ? 'live' : 'waiting') : null}
+          role="host"
+        />
       </section>
     </main>
   )
