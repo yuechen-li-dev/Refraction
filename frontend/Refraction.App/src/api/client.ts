@@ -1,6 +1,23 @@
 import type { ApiErrorResponse, CreateRoomResponse, ResolveRoomResponse, RoomState } from '../types/app'
 
-export const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? 'http://localhost:5057'
+function resolveApiBaseUrl(): string {
+  const configuredBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim()
+  if (configuredBaseUrl) {
+    return configuredBaseUrl.replace(/\/$/, '')
+  }
+
+  if (import.meta.env.DEV) {
+    return 'http://localhost:5057'
+  }
+
+  if (typeof window !== 'undefined') {
+    return window.location.origin
+  }
+
+  return ''
+}
+
+export const apiBaseUrl = resolveApiBaseUrl()
 
 export class ApiRequestError extends Error {
   readonly code: string
