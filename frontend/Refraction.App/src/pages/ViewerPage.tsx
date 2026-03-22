@@ -2,6 +2,7 @@ import { Room, RoomEvent, Track } from 'livekit-client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { ApiRequestError, resolveRoom } from '../api/client'
+import { ChatPanel } from '../components/ChatPanel'
 import { StatusBadge } from '../components/StatusBadge'
 import type { ResolveRoomResponse, ViewerState } from '../types/app'
 
@@ -322,7 +323,7 @@ export function ViewerPage() {
         <div className="hero-copy">
           <p className="eyebrow">Viewer</p>
           <h1>Watch stream</h1>
-          <p className="lede">Passive viewer mode only. No upstream media, chat, or controls.</p>
+          <p className="lede">Passive viewer mode with session-native ephemeral chat. No upstream media beyond chat text.</p>
         </div>
         <div className="hero-status">
           <StatusBadge tone={badge.tone} label={badge.text} />
@@ -342,26 +343,36 @@ export function ViewerPage() {
           </div>
         </article>
 
-        <article className="panel panel--stack">
-          <div className="panel-header">
-            <h2>Session</h2>
-            <p>What the viewer currently knows about the room.</p>
-          </div>
-          <div className="details-list">
-            <div>
-              <span>Room slug</span>
-              <strong>{roomInfo?.roomSlug ?? slug}</strong>
+        <div className="viewer-side-column">
+          <article className="panel panel--stack">
+            <div className="panel-header">
+              <h2>Session</h2>
+              <p>What the viewer currently knows about the room.</p>
             </div>
-            <div>
-              <span>Backend state</span>
-              <strong>{roomInfo?.state ?? 'loading'}</strong>
+            <div className="details-list">
+              <div>
+                <span>Room slug</span>
+                <strong>{roomInfo?.roomSlug ?? slug}</strong>
+              </div>
+              <div>
+                <span>Backend state</span>
+                <strong>{roomInfo?.state ?? 'loading'}</strong>
+              </div>
+              <div>
+                <span>Mode</span>
+                <strong>Subscriber + chat</strong>
+              </div>
             </div>
-            <div>
-              <span>Mode</span>
-              <strong>Subscriber only</strong>
-            </div>
-          </div>
-        </article>
+          </article>
+
+          <ChatPanel
+            key={roomInfo?.roomSlug ?? slug}
+            title="Room chat"
+            roomSlug={roomInfo?.roomSlug ?? slug}
+            roomState={status === 'ended' ? 'ended' : status === 'error' ? 'error' : roomInfo?.state ?? null}
+            role="viewer"
+          />
+        </div>
       </section>
     </main>
   )

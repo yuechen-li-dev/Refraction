@@ -1,7 +1,10 @@
 using Refraction.Api.Configuration;
 using Refraction.Api.Contracts;
+using Refraction.Api.Hubs;
 using Refraction.Api.Models;
 using Refraction.Api.Services;
+using Refraction.Api.Services.Chat;
+using Microsoft.AspNetCore.SignalR;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,8 +26,11 @@ builder.Services.AddSingleton(roomSessionOptions);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<InMemoryRoomSessionStore>();
 builder.Services.AddSingleton<IRoomSessionStore>(static serviceProvider => serviceProvider.GetRequiredService<InMemoryRoomSessionStore>());
+builder.Services.AddSingleton<IRoomChatStore, InMemoryRoomChatStore>();
+builder.Services.AddSingleton<IChatConnectionStore, InMemoryChatConnectionStore>();
 builder.Services.AddHostedService<RoomSessionCleanupService>();
 builder.Services.AddSingleton<ILiveKitTokenService, LiveKitTokenService>();
+builder.Services.AddSignalR();
 
 builder.Services.AddCors(options =>
 {
@@ -32,7 +38,8 @@ builder.Services.AddCors(options =>
     {
         policy.WithOrigins(appOptions.AllowedOrigins)
             .AllowAnyHeader()
-            .AllowAnyMethod();
+            .AllowAnyMethod()
+            .AllowCredentials();
     });
 });
 
@@ -96,12 +103,31 @@ app.MapGet("/api/rooms/{slug}", (
         message));
 });
 
-app.MapPost("/api/rooms/{slug}/state", (
+app.MapPost("/api/rooms/{slug}/state", async (
     string slug,
     UpdateRoomStateRequest request,
-    IRoomSessionStore store) =>
+    IRoomSessionStore store,
+    IRoomChatStore chatStore,
+    IHubContext<ChatHub, IChatClient> chatHub) =>
 {
     var result = store.TryUpdateState(slug, request.State);
+
+    if (result.Status == RoomStateUpdateStatus.Updated && result.Session is not null)
+    {
+        if (result.Session.State == RoomState.Live)
+        {
+            var systemMessage = chatStore.AddSystemMessage(result.Session.RoomSlug, "Stream started.");
+            await chatHub.Clients.Group(result.Session.RoomSlug).ReceiveMessage(ChatContracts.Map(systemMessage));
+        }
+        else if (result.Session.State == RoomState.Ended)
+        {
+            var systemMessage = chatStore.AddSystemMessage(result.Session.RoomSlug, "Stream ended. Chat is closed.");
+            await chatHub.Clients.Group(result.Session.RoomSlug).ReceiveMessage(ChatContracts.Map(systemMessage));
+            await chatHub.Clients.Group(result.Session.RoomSlug)
+                .ChatClosed(new ChatClosedEvent(result.Session.RoomSlug, RoomState.Ended, "Stream ended. Chat is closed."));
+            chatStore.ClearRoom(result.Session.RoomSlug);
+        }
+    }
 
     return result.Status switch
     {
@@ -119,13 +145,28 @@ app.MapPost("/api/rooms/{slug}/state", (
     };
 });
 
-app.MapPost("/api/rooms/{slug}/end", (string slug, IRoomSessionStore store) =>
+app.MapPost("/api/rooms/{slug}/end", async (
+    string slug,
+    IRoomSessionStore store,
+    IRoomChatStore chatStore,
+    IHubContext<ChatHub, IChatClient> chatHub) =>
 {
     var session = store.MarkEnded(slug);
-    return session is null
-        ? Results.NotFound(new ErrorResponse("room_not_found", "Room link is invalid or has expired.", RoomState.Error))
-        : Results.Ok(new RoomEndedResponse(session.RoomSlug, session.State));
+    if (session is null)
+    {
+        return Results.NotFound(new ErrorResponse("room_not_found", "Room link is invalid or has expired.", RoomState.Error));
+    }
+
+    var systemMessage = chatStore.AddSystemMessage(session.RoomSlug, "Stream ended. Chat is closed.");
+    await chatHub.Clients.Group(session.RoomSlug).ReceiveMessage(ChatContracts.Map(systemMessage));
+    await chatHub.Clients.Group(session.RoomSlug)
+        .ChatClosed(new ChatClosedEvent(session.RoomSlug, session.State, "Stream ended. Chat is closed."));
+    chatStore.ClearRoom(session.RoomSlug);
+
+    return Results.Ok(new RoomEndedResponse(session.RoomSlug, session.State));
 });
+
+app.MapHub<ChatHub>("/hubs/chat");
 
 app.Run();
 

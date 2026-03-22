@@ -2,9 +2,9 @@
 
 Refraction is a brutally minimal one-way screen streaming app. A host opens the app, clicks **Share screen**, gets a link, and viewers open that link to watch the live screen stream in a browser.
 
-M0, M0.5, M0c, and M1 delivered the narrow product slice and hardening pass. M2 keeps the same product shape while adding one minimal public deployment path.
+M0, M0.5, M0c, and M1 delivered the narrow product slice and hardening pass. M2 kept the same product shape while adding one minimal public deployment path. M3 adds ephemeral room chat without changing the session-native nature of the product.
 
-## Milestone status: M2
+## Milestone status: M3
 
 The implementation remains intentionally narrow:
 
@@ -13,7 +13,7 @@ The implementation remains intentionally narrow:
 - ASP.NET Core minimal API for ephemeral room creation, viewer resolution, and room state transitions.
 - Server-side LiveKit token minting.
 - In-memory session state only, with explicit cleanup and expiration rules.
-- Local validation target: **1 host + many passive viewers**.
+- Local validation target: **1 host + many viewers with ephemeral room chat**.
 - Public deployment target: **1 VPS + external LiveKit + public HTTPS URL**.
 
 ## Tech stack
@@ -229,13 +229,13 @@ Use this flow to confirm the public deployment is working end-to-end across diff
 8. Stop sharing on the host.
 9. Confirm the viewer transitions to the ended state instead of hanging on a stale live screen.
 
-### M2 limitations
+### M3 limitations
 
 This deployment is intentionally minimal and keeps all existing non-goals:
 
 - no auth
 - no audio
-- no chat
+- no durable chat history
 - no recording
 - no persistence/database
 - no autoscaling
@@ -256,7 +256,7 @@ Required values:
 - `LIVEKIT_API_KEY`: LiveKit API key.
 - `LIVEKIT_API_SECRET`: LiveKit API secret.
 - `PUBLIC_APP_BASE_URL`: public URL where the React app is served. Local default: `http://localhost:5173`. Public deployment example: `https://refraction.example.com`.
-- `CORS_ALLOWED_ORIGINS`: comma-separated allowed frontend origins. Local default: `http://localhost:5173`. Public deployment example: `https://refraction.example.com`.
+- `CORS_ALLOWED_ORIGINS`: comma-separated allowed frontend origins. Local default: `http://localhost:5173`. Public deployment example: `https://refraction.example.com`. This is also used by the SignalR chat hub.
 
 Optional session lifecycle overrides:
 
@@ -280,7 +280,9 @@ Use this after starting the app locally:
 - [ ] Browser capture permission is granted and the host status reaches **Live**.
 - [ ] Viewer A opens the generated `/r/:slug` link.
 - [ ] Viewer B opens the same `/r/:slug` link concurrently.
+- [ ] Host and viewers each see the chat panel with a temporary display name that can be edited before first send.
 - [ ] Both viewers see the host screen live.
+- [ ] Host and viewers can exchange live chat messages in the same room.
 - [ ] One viewer refreshes during the active session and rejoins correctly without affecting the other viewer.
 - [ ] Host stops sharing from the app or browser capture UI.
 - [ ] Viewer sees the ended/dead terminal state rather than a hanging live state.
@@ -295,7 +297,9 @@ The API keeps sessions only in memory, with explicit lifecycle rules:
 3. If the host stops sharing, closes the page, disconnects unexpectedly, or the maximum live TTL elapses, the session transitions to `ended`.
 4. Ended sessions remain resolvable for a short retention window so viewers can see a clear ended state.
 5. After retention, the slug is removed from memory and resolves as invalid/expired.
-6. A background cleanup loop sweeps expired sessions on a fixed interval, and request-time normalization also enforces the same rules.
+6. While the session is active, the chat hub keeps only a bounded in-memory recent-message buffer per room and replays that buffer to late joiners in the active session.
+7. When the stream ends, chat immediately becomes terminal and no new normal chat messages are accepted.
+8. A background cleanup loop sweeps expired sessions on a fixed interval, and request-time normalization also enforces the same rules.
 
 ## Minimal API contract
 
@@ -345,7 +349,19 @@ Used by the host client to mark a stream `live` or `ended`.
 
 ### `POST /api/rooms/{slug}/end`
 
-Explicit end call used when the host stops sharing or local teardown wants to clean up a partially created session.
+Explicit end call used when the host stops sharing or local teardown wants to clean up a partially created session. Ending the room also ends chat for that slug.
+
+### `GET|POST /hubs/chat`
+
+SignalR hub used for ephemeral room chat.
+
+Capabilities:
+
+- join a valid `waiting` or `live` room with a temporary display name
+- replay a small recent in-memory buffer for the active session only
+- send user chat messages to everyone joined to the same room slug
+- receive small system messages when the stream starts or ends
+- reject ended, dead, or expired rooms
 
 ## Validation commands
 
@@ -376,7 +392,7 @@ npm run build
 | Host receives a viewer link for the active session. | Complete | Room creation returns `viewerUrl`, and the host UI exposes copyable link output. |
 | Viewer can open `/r/:slug` and watch passively. | Complete | Viewer route resolves the slug, joins with a viewer token, and subscribes without any upstream controls. |
 | Local run works with a minimal backend + frontend setup. | Complete | README, env templates, backend defaults, frontend defaults, and `scripts/run-local.sh` now all point at the same `5173`/`5057` local path. |
-| Scope stays intentionally narrow. | Complete | No auth, chat, audio, recording, persistence, multi-host, mobile, or deployment workflow is added. |
+| Scope stays intentionally narrow. | Complete | No auth, durable history, audio, recording, persistence, multi-host, mobile, or deployment workflow is added. |
 
 ### M0.5 requirements
 
@@ -407,13 +423,14 @@ npm run build
 | Viewer links work across networks. | Complete | The documented public deployment sets `PUBLIC_APP_BASE_URL` to the real HTTPS origin, so generated `/r/:slug` links are shareable outside localhost. |
 | LiveKit integration remains minimal and explicit. | Complete | M2 documents external LiveKit as the blessed deployment assumption, and the deployed backend still mints host/viewer tokens from environment-provided LiveKit credentials. |
 
-## Known limitations after M2
+## Known limitations after M3
 
 - Refraction still depends on an already-running LiveKit deployment; this repo does not provision LiveKit.
-- Session state is still process-local and in-memory only. Restarting the API invalidates active slugs immediately.
+- Session state and chat state are still process-local and in-memory only. Restarting the API invalidates active slugs immediately and erases room chat.
 - The app still targets exactly one host and passive viewers only.
-- No auth, chat, audio, recording, persistence, admin surface, multi-host support, mobile support, autoscaling, or observability stack has been added.
-- Frontend production build may still emit a chunk-size warning because `livekit-client` and the app ship in the same main bundle.
+- Chat is intentionally basic: temporary names, plain text messages, small system messages, and a bounded recent buffer only.
+- No auth, durable profiles, cross-session identity, DMs, reactions, audio, recording, persistence, admin surface, multi-host support, mobile support, autoscaling, or observability stack has been added.
+- Frontend production build may still emit a chunk-size warning because `livekit-client`, SignalR, and the app ship in the same main bundle.
 
 ## Repository layout
 

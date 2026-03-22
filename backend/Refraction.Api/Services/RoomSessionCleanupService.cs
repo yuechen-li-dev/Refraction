@@ -1,21 +1,25 @@
 using Refraction.Api.Configuration;
+using Refraction.Api.Services.Chat;
 
 namespace Refraction.Api.Services;
 
 public sealed class RoomSessionCleanupService : BackgroundService
 {
     private readonly InMemoryRoomSessionStore store;
+    private readonly IRoomChatStore chatStore;
     private readonly RoomSessionOptions options;
     private readonly ILogger<RoomSessionCleanupService> logger;
     private readonly TimeProvider timeProvider;
 
     public RoomSessionCleanupService(
         InMemoryRoomSessionStore store,
+        IRoomChatStore chatStore,
         RoomSessionOptions options,
         ILogger<RoomSessionCleanupService> logger,
         TimeProvider timeProvider)
     {
         this.store = store;
+        this.chatStore = chatStore;
         this.options = options;
         this.logger = logger;
         this.timeProvider = timeProvider;
@@ -27,10 +31,15 @@ public sealed class RoomSessionCleanupService : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested && await timer.WaitForNextTickAsync(stoppingToken))
         {
-            var removedCount = store.CleanupExpiredSessions();
-            if (removedCount > 0)
+            var removedSessions = store.CleanupExpiredSessions();
+            var removedChats = chatStore.CleanupInactiveRooms(roomSlug => store.GetBySlug(roomSlug) is not null);
+
+            if (removedSessions > 0 || removedChats > 0)
             {
-                logger.LogDebug("Cleaned up {RemovedCount} expired room sessions.", removedCount);
+                logger.LogDebug(
+                    "Cleaned up {RemovedSessions} expired room sessions and {RemovedChats} inactive chat buffers.",
+                    removedSessions,
+                    removedChats);
             }
         }
     }
