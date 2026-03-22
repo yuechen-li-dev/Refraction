@@ -1,0 +1,39 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: backend/Refraction.Api/Dockerfile
+    restart: unless-stopped
+    environment:
+      LIVEKIT_URL: ${LIVEKIT_URL}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      PUBLIC_APP_BASE_URL: ${PUBLIC_APP_BASE_URL}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      ROOM_SESSION_WAITING_TTL_MINUTES: ${ROOM_SESSION_WAITING_TTL_MINUTES:-15}
+      ROOM_SESSION_LIVE_TTL_MINUTES: ${ROOM_SESSION_LIVE_TTL_MINUTES:-240}
+      ROOM_SESSION_ENDED_RETENTION_MINUTES: ${ROOM_SESSION_ENDED_RETENTION_MINUTES:-10}
+      ROOM_SESSION_CLEANUP_INTERVAL_SECONDS: ${ROOM_SESSION_CLEANUP_INTERVAL_SECONDS:-30}
+
+  web:
+    build:
+      context: ..
+      dockerfile: frontend/Refraction.App/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
